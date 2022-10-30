@@ -2,11 +2,13 @@ import logging
 import os
 import sys
 import time
+import threading
 from http import HTTPStatus
 
 import requests
 import telegram
 from dotenv import load_dotenv
+
 from exceptions import (EmptyResponseError, HTTPStatusError, NotSendException,
                         ResponseError, TelegramError)
 
@@ -17,7 +19,7 @@ PRACTICUM_TOKEN = os.getenv("YP_TOKEN")
 TELEGRAM_TOKEN = os.getenv("TG_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TG_CHAT_ID")
 
-RETRY_TIME = 600
+RETRY_TIME = 10
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
@@ -94,7 +96,6 @@ def parse_status(homework: dict):
         raise KeyError(f'Ключ "homework_name" отсутствует в {homework}')
     homework_name = homework['homework_name']
     homework_status = homework['status']
-    reviewer_comment = homework['reviewer_comment']
     if homework_status not in HOMEWORK_STATUSES:
         logging.error('Статус не обнаружен в списке')
         raise ValueError('Статус не обнаружен в списке')
@@ -108,6 +109,15 @@ def check_tokens():
     return all((PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID))
 
 
+def send_sms_about_server_is_working():
+    tmp = telegram.Bot(token=TELEGRAM_TOKEN)
+    bot = telegram.Bot(token=TELEGRAM_TOKEN)
+    server_is_running = 'Сервер работает'
+    bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=server_is_running)
+    logging.info(f'Проверка на работу сайта завершена')
+    return
+
+
 def main():
     """Основная логика работы бота."""
     if not check_tokens():
@@ -118,7 +128,8 @@ def main():
         sys.exit(not_enough_tokens)
 
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
-    current_timestamp = int(time.time()) - 60*60*24*50
+    threading.Timer(86400, send_sms_about_server_is_working).start()
+    current_timestamp = int(time.time())
     current_report = {
         'lesson_name': '',
         'name': '',
@@ -141,7 +152,6 @@ def main():
                         'reviewer_comment')
                 else:
                     current_report['reviewer_comment'] = ''
-
                 message = (f'Модуль: {current_report["lesson_name"]}\n'
                            f'Домашка: {current_report["name"]}\n\n'
                            f'Вердикт: {current_report["output"]}\n\n'
@@ -150,10 +160,9 @@ def main():
             else:
                 message = 'Домашки нет, проверять нечего.'
                 current_report['output'] = message
-
             if current_report != prev_report:
-                send_message(bot, message)
                 prev_report = current_report.copy()
+                send_message(bot, message)
             else:
                 logging.debug('Изменений нет.')
 
